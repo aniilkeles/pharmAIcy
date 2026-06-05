@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { TrendingUp, Package, Clock, AlertTriangle } from 'lucide-react'
+import { TrendingUp, Package, Clock, AlertTriangle, ClipboardList, CheckCircle, Timer } from 'lucide-react'
 import { useAPI } from '@/hooks/useAPI'
 import { useStore } from '@/store/useStore'
 import { useNotifications } from '@/hooks/useNotifications'
@@ -34,6 +34,7 @@ function Dashboard() {
   }
 
   const sales = dashboardData.sales || {}
+  const rxStats = dashboardData.prescription_stats || {}
 
   return (
     <motion.div
@@ -76,6 +77,33 @@ function Dashboard() {
           icon={Clock}
           color="danger"
           delay={0.12}
+        />
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <KPICard
+          title="Today's Prescriptions"
+          value={rxStats.today ?? 0}
+          sub="Prescriptions today"
+          icon={ClipboardList}
+          color="accent"
+          delay={0}
+        />
+        <KPICard
+          title="Fulfillment Rate"
+          value={`${rxStats.fulfillment_rate ?? 0}%`}
+          sub="Qty dispensed vs requested"
+          icon={CheckCircle}
+          color="blue"
+          delay={0.04}
+        />
+        <KPICard
+          title="Pending"
+          value={rxStats.pending ?? 0}
+          sub="Awaiting dispensing"
+          icon={Timer}
+          color="warning"
+          delay={0.08}
         />
       </div>
 

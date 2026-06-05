@@ -1,9 +1,9 @@
 import React from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, Package, Clock, Link2, TrendingUp,
-  ScanBarcode, Bell, Settings
+  ScanBarcode, Bell, Settings, ClipboardList, Users
 } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 
@@ -11,6 +11,8 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/stock', icon: Package, label: 'Stock' },
   { to: '/expiry', icon: Clock, label: 'Expiry' },
+  { to: '/prescriptions', icon: ClipboardList, label: 'Prescriptions' },
+  { to: '/patients', icon: Users, label: 'Patients' },
   { to: '/crosssell', icon: Link2, label: 'Cross Sell' },
   { to: '/predictions', icon: TrendingUp, label: 'Predictions' },
   { to: '/scanner', icon: ScanBarcode, label: 'Scanner' },

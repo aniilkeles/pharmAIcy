@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useAuth } from '@/hooks/useAuth'
@@ -12,6 +12,11 @@ import Predictions from '@/pages/Predictions'
 import Scanner from '@/pages/Scanner'
 import Notifications from '@/pages/Notifications'
 import Settings from '@/pages/Settings'
+import Patients from '@/pages/Patients'
+import PatientDetail from '@/pages/PatientDetail'
+import Prescriptions from '@/pages/Prescriptions'
+import CreatePrescription from '@/pages/CreatePrescription'
+import PrescriptionDetail from '@/pages/PrescriptionDetail'
 
 function App() {
   const { user, loading } = useAuth()
@@ -44,6 +49,11 @@ function App() {
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/patients" element={<Patients />} />
+          <Route path="/patients/:id" element={<PatientDetail />} />
+          <Route path="/prescriptions" element={<Prescriptions />} />
+          <Route path="/prescriptions/new" element={<CreatePrescription />} />
+          <Route path="/prescriptions/:id" element={<PrescriptionDetail />} />
         </Routes>
       </AnimatePresence>
     </Layout>

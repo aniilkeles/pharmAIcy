@@ -15,6 +15,7 @@ export default {
         blue: '#5B8DEF',
         warning: '#F59E0B',
         danger: '#EF4444',
+        success: '#10B981',
         text: '#EDEDEC',
         muted: '#6B6B6B'
       },

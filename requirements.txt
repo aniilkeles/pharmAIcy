@@ -11,3 +11,5 @@ python-dotenv==1.0.1
 aiofiles==23.2.1
 pydantic==2.7.3
 requests==2.32.3
+slowapi==0.1.9
+python-jose[cryptography]==3.3.0

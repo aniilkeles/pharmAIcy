@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from backend.models import Product, Sale, Inventory
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+
 
 def analyze_sales(db: Session) -> dict:
     sales = db.query(Sale).all()
@@ -57,6 +59,7 @@ def analyze_sales(db: Session) -> dict:
         "total_sales": total_sales
     }
 
+
 def get_low_stock(db: Session) -> list:
     results = []
     inventories = db.query(Inventory).all()
@@ -73,3 +76,30 @@ def get_low_stock(db: Session) -> list:
                     "status": "critical" if inv.stock <= inv.critical_stock // 2 else "warning"
                 })
     return sorted(results, key=lambda x: x["stock"])
+
+
+def get_prescription_stats(db: Session) -> dict:
+    try:
+        from backend.models import Prescription, PrescriptionItem
+        today = date.today()
+
+        today_count = db.query(Prescription).filter(
+            func.date(Prescription.created_at) == today
+        ).count()
+
+        pending = db.query(Prescription).filter(
+            Prescription.status == "pending"
+        ).count()
+
+        total_requested = db.query(func.sum(PrescriptionItem.quantity_requested)).scalar() or 0
+        total_dispensed = db.query(func.sum(PrescriptionItem.quantity_dispensed)).scalar() or 0
+
+        fulfillment_rate = round(total_dispensed / total_requested * 100, 1) if total_requested > 0 else 0
+
+        return {
+            "today": today_count,
+            "pending": pending,
+            "fulfillment_rate": fulfillment_rate
+        }
+    except Exception:
+        return {"today": 0, "pending": 0, "fulfillment_rate": 0}

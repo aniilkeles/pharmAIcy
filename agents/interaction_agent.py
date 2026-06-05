@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.models import Sale, Product
 from datetime import datetime, timedelta
 
+
 def find_cross_sell(db: Session) -> list:
     sales = db.query(Sale).all()
     if not sales:
@@ -61,3 +62,38 @@ def find_cross_sell(db: Session) -> list:
         })
 
     return sorted(results, key=lambda x: x["lift"], reverse=True)
+
+
+def get_prescription_cross_sell(db: Session, prescription_id: int) -> list:
+    try:
+        from backend.models import Prescription
+
+        rx = db.query(Prescription).filter(Prescription.id == prescription_id).first()
+        if not rx or not rx.items:
+            return []
+
+        product_ids = [item.product_id for item in rx.items]
+        product_names = []
+        for pid in product_ids:
+            p = db.query(Product).filter(Product.product_id == pid).first()
+            if p:
+                product_names.append(p.name)
+
+        all_rules = find_cross_sell(db)
+        suggestions = []
+        seen = set()
+
+        for rule in all_rules:
+            if any(ant in product_names for ant in rule["antecedents"]):
+                for cons in rule["consequents"]:
+                    if cons not in product_names and cons not in seen:
+                        seen.add(cons)
+                        suggestions.append({
+                            "product": cons,
+                            "confidence": rule["confidence"],
+                            "reason": f"Often bought with {rule['antecedents'][0]}"
+                        })
+
+        return suggestions[:5]
+    except Exception:
+        return []
