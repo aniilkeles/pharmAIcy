@@ -9,6 +9,7 @@
     "patients": "Patients",
     "scanner": "Scanner",
     "notifications": "Notifications",
+    "auditlog": "Audit Log",
     "settings": "Settings"
   },
   "common": {
@@ -78,7 +79,11 @@
     "warning": "Warning",
     "ok": "OK",
     "no_low_stock": "No low stock items",
-    "no_low_stock_sub": "All products have sufficient stock levels"
+    "no_low_stock_sub": "All products have sufficient stock levels",
+    "all": "All",
+    "low": "Low Stock",
+    "critical": "Critical",
+    "out_of_stock": "Out of Stock"
   },
   "expiry": {
     "title": "Expiry Tracking",

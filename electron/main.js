@@ -2,13 +2,36 @@ const { app, BrowserWindow, ipcMain, dialog, safeStorage, session } = require('e
 const path = require('path')
 const { spawn } = require('child_process')
 const http = require('http')
+const net = require('net')
+const os = require('os')
 const fs = require('fs')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+process.stdout.on('error', (err) => { if (err.code === 'EPIPE') process.exit(0) })
+process.stderr.on('error', (err) => { if (err.code === 'EPIPE') process.exit(0) })
+
 let mainWindow
 let pythonProcess
+let backendPort = 8000
 const SESSION_FILE = path.join(app.getPath('userData'), 'session.enc')
+const PORT_FILE = path.join(os.tmpdir(), 'pharmaicy.port')
+
+function checkPortFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer()
+    srv.once('error', () => resolve(false))
+    srv.once('listening', () => srv.close(() => resolve(true)))
+    srv.listen(port, '127.0.0.1')
+  })
+}
+
+async function findFreePort() {
+  for (const p of [8000, 8001, 8002]) {
+    if (await checkPortFree(p)) return p
+  }
+  return 8002
+}
 
 function saveSafeSession(token) {
   try {
@@ -61,7 +84,7 @@ function waitForBackend(url, maxAttempts = 30) {
   })
 }
 
-function startPythonBackend() {
+function startPythonBackend(port) {
   const projectRoot = isDev ? __dirname.replace(/[\\/]electron$/, '') : path.dirname(app.getPath('exe'))
   const backendDir = isDev ? projectRoot : path.join(process.resourcesPath, 'backend')
 
@@ -70,7 +93,7 @@ function startPythonBackend() {
   pythonProcess = spawn(pythonCmd, [
     '-m', 'uvicorn',
     'backend.main:app',
-    '--port', '8000',
+    '--port', String(port),
     '--host', '127.0.0.1'
   ], {
     cwd: isDev ? projectRoot : backendDir,
@@ -79,23 +102,42 @@ function startPythonBackend() {
   })
 
   pythonProcess.stdout.on('data', (data) => {
-    console.log('[Python]', data.toString())
+    try {
+      process.stdout.write(`[Python]: ${data}`)
+    } catch (e) {
+      // pipe closed, ignore
+    }
   })
 
   pythonProcess.stderr.on('data', (data) => {
-    console.error('[Python ERR]', data.toString())
+    try {
+      process.stderr.write(`[Python ERR]: ${data}`)
+    } catch (e) {
+      // pipe closed, ignore
+    }
   })
 
   pythonProcess.on('close', (code) => {
-    console.log(`Python process exited with code ${code}`)
+    try {
+      process.stdout.write(`Python process exited with code ${code}\n`)
+    } catch (e) {
+      // pipe closed, ignore
+    }
+  })
+
+  pythonProcess.on('error', (err) => {
+    if (err.code !== 'EPIPE') console.error(err)
   })
 }
 
 async function createWindow() {
-  startPythonBackend()
+  backendPort = await findFreePort()
+  console.log(`[Electron] Using backend port ${backendPort}`)
+  fs.writeFileSync(PORT_FILE, String(backendPort))
+  startPythonBackend(backendPort)
 
   try {
-    await waitForBackend('http://127.0.0.1:8000/agent-status')
+    await waitForBackend(`http://127.0.0.1:${backendPort}/agent-status`)
     console.log('Backend ready')
   } catch (e) {
     console.error('Backend did not start in time:', e.message)
@@ -110,11 +152,7 @@ async function createWindow() {
     minHeight: 680,
     backgroundColor: '#0F0F0F',
     titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#0F0F0F',
-      symbolColor: '#EDEDEC',
-      height: 32
-    },
+    frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -159,16 +197,20 @@ app.whenReady().then(() => {
     }
   )
 
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173 ws://localhost:5173 http://127.0.0.1:8000 https://*.supabase.co wss://*.supabase.co; media-src 'self' mediastream: blob:; connect-src 'self' http://127.0.0.1:8000 https://*.supabase.co wss://*.supabase.co ws://localhost:5173"
-        ]
-      }
-    })
-  })
+  // Use URL filter so this handler never fires for backend/API responses
+  session.defaultSession.webRequest.onHeadersReceived(
+    { urls: ['http://localhost:5173/*', 'file://*'] },
+    (details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            `default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173 ws://localhost:5173 http://127.0.0.1:${backendPort} https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' mediastream: blob:; connect-src 'self' http://127.0.0.1:${backendPort} https://*.supabase.co wss://*.supabase.co ws://localhost:5173`
+          ]
+        }
+      })
+    }
+  )
 
   createWindow()
 })

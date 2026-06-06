@@ -1,10 +1,51 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Bot, User } from 'lucide-react'
+import { Send, Bot, User, Trash2 } from 'lucide-react'
 import { useChat } from '@/hooks/useChat'
 
+function applyBold(str) {
+  const parts = str.split(/\*\*(.+?)\*\*/g)
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+  )
+}
+
+function renderContent(text) {
+  const lines = text.split('\n')
+  const result = []
+  let listItems = []
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      result.push(
+        <ul key={`ul-${result.length}`} style={{ paddingLeft: 16, margin: '4px 0', listStyleType: 'disc' }}>
+          {listItems}
+        </ul>
+      )
+      listItems = []
+    }
+  }
+
+  lines.forEach((line, i) => {
+    if (/^[-•]\s/.test(line)) {
+      listItems.push(<li key={i}>{applyBold(line.replace(/^[-•]\s/, ''))}</li>)
+    } else {
+      flushList()
+      result.push(
+        <span key={i}>
+          {applyBold(line)}
+          {i < lines.length - 1 && <br />}
+        </span>
+      )
+    }
+  })
+  flushList()
+
+  return result
+}
+
 function ChatPanel() {
-  const { messages, send, sending } = useChat()
+  const { messages, send, sending, clear } = useChat()
   const [input, setInput] = useState('')
   const bottomRef = useRef(null)
 
@@ -28,6 +69,15 @@ function ChatPanel() {
       <div className="px-4 py-3 border-b border-border flex items-center gap-2">
         <Bot size={16} className="text-accent" />
         <span className="text-sm font-medium text-text">PharmAIcy Assistant</span>
+        {messages.length > 0 && (
+          <button
+            onClick={clear}
+            title="Clear chat"
+            className="ml-auto w-7 h-7 flex items-center justify-center rounded text-muted hover:text-text transition-colors"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
@@ -37,7 +87,7 @@ function ChatPanel() {
             <p className="text-sm text-muted">Ask me anything about your pharmacy data</p>
             <div className="flex flex-col gap-1 mt-2">
               {["Which products need restocking?", "What's my best selling product?", "Any products expiring soon?"].map(q => (
-                <button key={q} onClick={() => { setInput(q) }}
+                <button key={q} onClick={() => setInput(q)}
                   className="text-xs text-accent hover:underline">
                   {q}
                 </button>
@@ -60,10 +110,13 @@ function ChatPanel() {
                   <Bot size={12} className="text-accent" />
                 </div>
               )}
-              <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
-                msg.role === 'user' ? 'bg-accent text-black' : 'bg-surface border border-border text-text'
-              }`}>
-                {msg.content}
+              <div
+                className={`max-w-[80%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
+                  msg.role === 'user' ? 'bg-accent text-black' : 'bg-surface border border-border text-text'
+                }`}
+                style={{ whiteSpace: 'pre-wrap' }}
+              >
+                {msg.role === 'assistant' ? renderContent(msg.content) : msg.content}
               </div>
               {msg.role === 'user' && (
                 <div className="w-6 h-6 rounded-full bg-card border border-border flex items-center justify-center shrink-0 mt-0.5">

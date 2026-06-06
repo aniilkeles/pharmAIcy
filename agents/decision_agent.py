@@ -102,7 +102,7 @@ Answer pharmacy management questions clearly and specifically. Use TL for curren
 
     messages = []
     if history:
-        for h in history[-5:]:
+        for h in history[-10:]:
             messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": message})
 

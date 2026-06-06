@@ -9,6 +9,7 @@
     "patients": "Hastalar",
     "scanner": "Tarayıcı",
     "notifications": "Bildirimler",
+    "auditlog": "Denetim Günlüğü",
     "settings": "Ayarlar"
   },
   "common": {
@@ -78,7 +79,11 @@
     "warning": "Uyarı",
     "ok": "Normal",
     "no_low_stock": "Düşük stok yok",
-    "no_low_stock_sub": "Tüm ürünler yeterli stok seviyesinde"
+    "no_low_stock_sub": "Tüm ürünler yeterli stok seviyesinde",
+    "all": "Tümü",
+    "low": "Az Stok",
+    "critical": "Kritik",
+    "out_of_stock": "Stok Dışı"
   },
   "expiry": {
     "title": "Miad Takibi",

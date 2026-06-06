@@ -35,8 +35,8 @@ def get_db_for_user(user_id: str):
             f"sqlite:///{db_path}",
             connect_args={"check_same_thread": False}
         )
-        # Create all tables for this user's DB
-        from backend.database import Base as _Base
-        _Base.metadata.create_all(bind=user_engine)
+        # Import models so all ORM classes are registered with Base before create_all
+        import backend.models  # noqa: F401
+        Base.metadata.create_all(bind=user_engine)
         _engine_cache[safe_id] = sessionmaker(autocommit=False, autoflush=False, bind=user_engine)
     return _engine_cache[safe_id]()

@@ -15,6 +15,7 @@ function Patients() {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [createError, setCreateError] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => { load() }, [])
@@ -28,16 +29,19 @@ function Patients() {
     }
   }
 
-  const handleCreate = async (e) => {
-    e.preventDefault()
+  const handleCreate = async () => {
+    console.log('[Patients] handleCreate called', form)
+    if (!form.first_name.trim() || !form.last_name.trim()) return
     setSaving(true)
+    setCreateError('')
     try {
       await createPatient(form)
       setModalOpen(false)
       setForm(EMPTY_FORM)
       load()
     } catch (e) {
-      console.error(e)
+      console.error('[Patients] createPatient failed:', e)
+      setCreateError(e.response?.data?.detail || e.message || 'Failed to save patient')
     } finally {
       setSaving(false)
     }
@@ -107,8 +111,8 @@ function Patients() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="New Patient">
-        <form onSubmit={handleCreate} className="flex flex-col gap-3">
+      <Modal open={modalOpen} onClose={() => { setModalOpen(false); setCreateError('') }} title="New Patient">
+        <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted block mb-1">First Name *</label>
@@ -162,21 +166,24 @@ function Patients() {
               className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent resize-none"
             />
           </div>
+          {createError && <p className="text-xs text-red-400">{createError}</p>}
           <div className="flex gap-2 justify-end mt-2">
             <button
-              type="button" onClick={() => setModalOpen(false)}
+              type="button" onClick={() => { setModalOpen(false); setCreateError('') }}
               className="px-4 py-2 border border-border text-muted text-sm rounded-lg hover:text-text transition-colors"
             >
               Cancel
             </button>
             <button
-              type="submit" disabled={saving}
+              type="button"
+              onClick={handleCreate}
+              disabled={saving || !form.first_name.trim() || !form.last_name.trim()}
               className="px-4 py-2 bg-accent text-black text-sm font-medium rounded-lg hover:bg-opacity-90 disabled:opacity-60"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
           </div>
-        </form>
+        </div>
       </Modal>
     </motion.div>
   )

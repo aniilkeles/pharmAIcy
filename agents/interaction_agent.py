@@ -1,8 +1,10 @@
 import pandas as pd
+from collections import defaultdict
 from mlxtend.frequent_patterns import apriori, association_rules
 from mlxtend.preprocessing import TransactionEncoder
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from backend.models import Sale, Product
+from backend.models import Sale, Product, Inventory
 from datetime import datetime, timedelta
 
 
@@ -97,3 +99,94 @@ def get_prescription_cross_sell(db: Session, prescription_id: int) -> list:
         return suggestions[:5]
     except Exception:
         return []
+
+
+def suggest_for_prescription(db: Session, product_ids: list) -> list:
+    if not product_ids:
+        return []
+
+    sales = db.query(Sale).all()
+
+    baskets_dict = defaultdict(set)
+    for s in sales:
+        key = f"rx_{s.prescription_id}" if s.prescription_id else f"date_{s.date}"
+        baskets_dict[key].add(s.product_id)
+
+    all_baskets = [list(b) for b in baskets_dict.values() if len(b) > 1]
+
+    if len(all_baskets) >= 5:
+        try:
+            te = TransactionEncoder()
+            te_array = te.fit_transform(all_baskets)
+            basket_df = pd.DataFrame(te_array, columns=te.columns_)
+            frequent = apriori(basket_df, min_support=0.02, use_colnames=True)
+
+            if not frequent.empty:
+                rules = association_rules(frequent, metric="confidence", min_threshold=0.3)
+
+                if not rules.empty:
+                    best = {}
+                    for _, row in rules.iterrows():
+                        antecedents = set(row["antecedents"])
+                        consequents = set(row["consequents"])
+                        if antecedents & set(product_ids):
+                            for pid in consequents:
+                                if pid not in product_ids:
+                                    conf = float(row["confidence"])
+                                    if pid not in best or best[pid] < conf:
+                                        best[pid] = conf
+
+                    result = []
+                    for pid, confidence in sorted(best.items(), key=lambda x: x[1], reverse=True):
+                        if len(result) >= 5:
+                            break
+                        p = db.query(Product).filter(Product.product_id == pid).first()
+                        if not p:
+                            continue
+                        inv = db.query(Inventory).filter(Inventory.product_id == pid).first()
+                        stock = inv.stock if inv else 0
+                        if stock == 0:
+                            continue
+                        result.append({
+                            "product_id": pid,
+                            "name": p.name,
+                            "confidence": round(confidence * 100, 1),
+                            "sale_price": p.sale_price,
+                            "stock": stock
+                        })
+
+                    if result:
+                        return result
+        except Exception:
+            pass
+
+    # Fallback: top products by sales volume, excluding already-selected and out-of-stock
+    top = (
+        db.query(Sale.product_id, func.sum(Sale.quantity).label("total"))
+        .filter(Sale.product_id.notin_(product_ids))
+        .group_by(Sale.product_id)
+        .order_by(func.sum(Sale.quantity).desc())
+        .limit(20)
+        .all()
+    )
+
+    result = []
+    for pid, _ in top:
+        if len(result) >= 5:
+            break
+        p = db.query(Product).filter(Product.product_id == pid).first()
+        if not p:
+            continue
+        inv = db.query(Inventory).filter(Inventory.product_id == pid).first()
+        stock = inv.stock if inv else 0
+        if stock == 0:
+            continue
+        result.append({
+            "product_id": pid,
+            "name": p.name,
+            "confidence": None,
+            "sale_price": p.sale_price,
+            "stock": stock
+        })
+
+    return result

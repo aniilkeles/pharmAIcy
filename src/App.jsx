@@ -7,7 +7,6 @@ import Auth from '@/pages/Auth'
 import Dashboard from '@/pages/Dashboard'
 import Stock from '@/pages/Stock'
 import Expiry from '@/pages/Expiry'
-import CrossSell from '@/pages/CrossSell'
 import Predictions from '@/pages/Predictions'
 import Scanner from '@/pages/Scanner'
 import Notifications from '@/pages/Notifications'
@@ -17,6 +16,7 @@ import PatientDetail from '@/pages/PatientDetail'
 import Prescriptions from '@/pages/Prescriptions'
 import CreatePrescription from '@/pages/CreatePrescription'
 import PrescriptionDetail from '@/pages/PrescriptionDetail'
+import AuditLog from '@/pages/AuditLog'
 
 function App() {
   const { user, loading } = useAuth()
@@ -44,7 +44,6 @@ function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/stock" element={<Stock />} />
           <Route path="/expiry" element={<Expiry />} />
-          <Route path="/crosssell" element={<CrossSell />} />
           <Route path="/predictions" element={<Predictions />} />
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/notifications" element={<Notifications />} />
@@ -54,6 +53,7 @@ function App() {
           <Route path="/prescriptions" element={<Prescriptions />} />
           <Route path="/prescriptions/new" element={<CreatePrescription />} />
           <Route path="/prescriptions/:id" element={<PrescriptionDetail />} />
+          <Route path="/audit-log" element={<AuditLog />} />
         </Routes>
       </AnimatePresence>
     </Layout>

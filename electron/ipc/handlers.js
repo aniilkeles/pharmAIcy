@@ -3,6 +3,14 @@ const fs = require('fs')
 const path = require('path')
 
 module.exports = function registerHandlers(ipcMain, { dialog, mainWindow, saveSafeSession, loadSafeSession, clearSafeSession }) {
+  ipcMain.on('minimize', () => mainWindow().minimize())
+  ipcMain.on('maximize', () => {
+    const win = mainWindow()
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.on('close-app', () => mainWindow().close())
+
   ipcMain.handle('open-file-dialog', async () => {
     const win = mainWindow()
     const result = await dialog.showOpenDialog(win, {

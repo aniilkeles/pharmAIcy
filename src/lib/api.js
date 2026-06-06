@@ -1,20 +1,34 @@
 import axios from 'axios'
-import { useStore } from '@/store/useStore'
+import { supabase } from '@/lib/supabase'
 
-const BASE_URL = 'http://127.0.0.1:8000'
+const _port = (typeof window !== 'undefined' && window.api?.backendPort) || 8000
+const BASE_URL = `http://127.0.0.1:${_port}`
 
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 60000
 })
 
-api.interceptors.request.use((config) => {
-  const user = useStore.getState().user
-  if (user?.id) {
-    config.headers['X-User-ID'] = user.id
+export async function refreshAuthHeader() {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+  } else {
+    delete api.defaults.headers.common['Authorization']
+  }
+}
+
+api.interceptors.request.use(async (config) => {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`
   }
   return config
 })
+
+refreshAuthHeader()
 
 // ─── Existing ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +89,15 @@ export const addProduct = (product) =>
 export const searchProducts = (q = '') =>
   api.get('/products/search', { params: { q } })
 
+export const getProducts = (params = {}) =>
+  api.get('/products', { params })
+
+export const updateProduct = (productId, data) =>
+  api.put(`/products/${productId}`, data)
+
+export const deleteProduct = (productId) =>
+  api.delete(`/products/${productId}`)
+
 // ─── Patients ──────────────────────────────────────────────────────────────────
 
 export const getPatients = (q = '') =>
@@ -121,5 +144,14 @@ export const repeatPrescription = (id) =>
 
 export const checkDrugInteractions = (product_ids) =>
   api.post('/drug-interactions/check', { product_ids })
+
+export const getPrescriptionSuggestions = (product_ids) =>
+  api.post('/prescriptions/suggest', { product_ids })
+
+export const seedDemoData = () =>
+  api.get('/seed-demo-data')
+
+export const getAuditLog = (params = {}) =>
+  api.get('/audit-log', { params })
 
 export default api

@@ -2,8 +2,8 @@ import React from 'react'
 import { NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, Package, Clock, Link2, TrendingUp,
-  ScanBarcode, Bell, Settings, ClipboardList, Users
+  LayoutDashboard, Package, Clock, TrendingUp,
+  ScanBarcode, Bell, Settings, ClipboardList, Users, History
 } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 
@@ -13,10 +13,10 @@ const navItems = [
   { to: '/expiry', icon: Clock, label: 'Expiry' },
   { to: '/prescriptions', icon: ClipboardList, label: 'Prescriptions' },
   { to: '/patients', icon: Users, label: 'Patients' },
-  { to: '/crosssell', icon: Link2, label: 'Cross Sell' },
   { to: '/predictions', icon: TrendingUp, label: 'Predictions' },
   { to: '/scanner', icon: ScanBarcode, label: 'Scanner' },
   { to: '/notifications', icon: Bell, label: 'Notifications' },
+  { to: '/audit-log', icon: History, label: 'Audit Log' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

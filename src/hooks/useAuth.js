@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useStore } from '@/store/useStore'
+import { refreshAuthHeader } from '@/lib/api'
 
 export function useAuth() {
   const { user, setUser } = useStore()
@@ -24,6 +25,7 @@ export function useAuth() {
       }
 
       setUser(data.session.user)
+      await refreshAuthHeader()
       return true
     } catch (e) {
       await window.api.clearSession()
@@ -48,6 +50,7 @@ export function useAuth() {
       })
       await window.api.saveSession(sessionStr)
       setUser(data.user)
+      await refreshAuthHeader()
       return { success: true }
     } catch (e) {
       setError(e.message)
@@ -75,6 +78,7 @@ export function useAuth() {
         })
         await window.api.saveSession(sessionStr)
         setUser(data.user)
+        await refreshAuthHeader()
       }
       return { success: true }
     } catch (e) {
@@ -89,6 +93,7 @@ export function useAuth() {
     await supabase.auth.signOut()
     await window.api.clearSession()
     setUser(null)
+    await refreshAuthHeader()
   }
 
   return { user, loading, error, login, register, logout, checkSavedSession }

@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, Search } from 'lucide-react'
 import {
   getPatients, createPatient, getDoctors, createDoctor,
-  searchProducts, createPrescription
+  searchProducts, createPrescription, getPrescriptionSuggestions
 } from '@/lib/api'
 import Button from '@/components/ui/Button'
 
@@ -21,18 +21,27 @@ function CreatePrescription() {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [showNewPatient, setShowNewPatient] = useState(false)
   const [newPatient, setNewPatient] = useState({ first_name: '', last_name: '', tc_no: '', phone: '' })
+  const [savingPatient, setSavingPatient] = useState(false)
+  const [patientError, setPatientError] = useState('')
 
   const [doctors, setDoctors] = useState([])
   const [doctorSearch, setDoctorSearch] = useState('')
   const [selectedDoctor, setSelectedDoctor] = useState(null)
   const [showNewDoctor, setShowNewDoctor] = useState(false)
   const [newDoctor, setNewDoctor] = useState({ first_name: '', last_name: '', specialty: '', hospital: '' })
+  const [savingDoctor, setSavingDoctor] = useState(false)
+  const [doctorError, setDoctorError] = useState('')
 
   const [productSearch, setProductSearch] = useState('')
   const [productResults, setProductResults] = useState([])
   const [items, setItems] = useState([])
 
   const [notes, setNotes] = useState('')
+  const [submitError, setSubmitError] = useState('')
+  const [dispenseResult, setDispenseResult] = useState('')
+
+  const [suggestions, setSuggestions] = useState([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
 
   useEffect(() => {
     loadPatients()
@@ -40,6 +49,17 @@ function CreatePrescription() {
     const pid = searchParams.get('patient_id')
     if (pid) preselectPatient(pid)
   }, [])
+
+  useEffect(() => {
+    if (step !== 2) return
+    const ids = items.map(i => i.product_id)
+    if (ids.length === 0) { setSuggestions([]); return }
+    setSuggestionsLoading(true)
+    getPrescriptionSuggestions(ids)
+      .then(res => setSuggestions(res.data))
+      .catch(() => setSuggestions([]))
+      .finally(() => setSuggestionsLoading(false))
+  }, [items, step])
 
   const preselectPatient = async (pid) => {
     try {
@@ -92,31 +112,72 @@ function CreatePrescription() {
     setItems(prev => prev.filter(i => i.product_id !== product_id))
   }
 
+  const addFromSuggestion = (suggestion) => {
+    addItem({ product_id: suggestion.product_id, name: suggestion.name, sale_price: suggestion.sale_price, stock: suggestion.stock })
+    setSuggestions(prev => prev.filter(s => s.product_id !== suggestion.product_id))
+  }
+
   const updateItem = (product_id, field, value) => {
     setItems(prev => prev.map(i => i.product_id === product_id ? { ...i, [field]: value } : i))
   }
 
   const handleAddNewPatient = async (e) => {
     e.preventDefault()
+    setPatientError('')
+    setSavingPatient(true)
+    console.log('[CreatePrescription] saving patient:', newPatient)
     try {
-      const res = await createPatient(newPatient)
-      setSelectedPatient({ ...newPatient, id: res.data.id })
+      const payload = {
+        first_name: newPatient.first_name.trim(),
+        last_name: newPatient.last_name.trim(),
+        tc_no: newPatient.tc_no.trim() || null,
+        phone: newPatient.phone.trim() || null,
+      }
+      const res = await createPatient(payload)
+      console.log('[CreatePrescription] patient created:', res.data)
+      setSelectedPatient({ ...payload, id: res.data.id })
       setShowNewPatient(false)
       setNewPatient({ first_name: '', last_name: '', tc_no: '', phone: '' })
-    } catch (e) {}
+      setStep(1)
+    } catch (err) {
+      console.error('[CreatePrescription] createPatient failed:', err)
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to save patient'
+      setPatientError(msg)
+    } finally {
+      setSavingPatient(false)
+    }
   }
 
   const handleAddNewDoctor = async (e) => {
     e.preventDefault()
+    setDoctorError('')
+    setSavingDoctor(true)
+    console.log('[CreatePrescription] saving doctor:', newDoctor)
     try {
-      const res = await createDoctor(newDoctor)
-      setSelectedDoctor({ ...newDoctor, id: res.data.id })
+      const payload = {
+        first_name: newDoctor.first_name.trim(),
+        last_name: newDoctor.last_name.trim(),
+        specialty: newDoctor.specialty.trim() || null,
+        hospital: newDoctor.hospital.trim() || null,
+      }
+      const res = await createDoctor(payload)
+      console.log('[CreatePrescription] doctor created:', res.data)
+      setSelectedDoctor({ ...payload, id: res.data.id })
       setShowNewDoctor(false)
       setNewDoctor({ first_name: '', last_name: '', specialty: '', hospital: '' })
-    } catch (e) {}
+      setStep(2)
+    } catch (err) {
+      console.error('[CreatePrescription] createDoctor failed:', err)
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to save doctor'
+      setDoctorError(msg)
+    } finally {
+      setSavingDoctor(false)
+    }
   }
 
   const handleSubmit = async (confirm = false) => {
+    console.log('[CreatePrescription] handleSubmit', { confirm, selectedPatient, selectedDoctor, items })
+    setSubmitError('')
     setSaving(true)
     try {
       const payload = {
@@ -132,10 +193,30 @@ function CreatePrescription() {
           instructions: i.instructions || null
         }))
       }
+      console.log('[CreatePrescription] posting payload:', payload)
       const res = await createPrescription(payload)
-      navigate(`/prescriptions/${res.data.id}`)
+      const data = res.data
+
+      if (confirm && data.fulfillment_rate !== undefined) {
+        const total = items.length
+        const dispensed = data.dispensed_items?.length ?? 0
+        const pct = data.fulfillment_rate
+        let msg = `Dispensed ${dispensed}/${total} items (${pct}% fulfillment)`
+        if (data.partial_items?.length > 0) {
+          msg += `. Partial: ${data.partial_items.map(p => `${p.name} (${p.dispensed}/${p.requested})`).join(', ')}`
+        }
+        if (data.out_of_stock_items?.length > 0) {
+          msg += `. Out of stock: ${data.out_of_stock_items.join(', ')}`
+        }
+        console.info('[Dispense result]', msg)
+        setDispenseResult(msg)
+        setTimeout(() => navigate(`/prescriptions/${data.id}`), 2000)
+      } else {
+        navigate(`/prescriptions/${data.id}`)
+      }
     } catch (e) {
-      console.error(e)
+      console.error('[CreatePrescription] handleSubmit failed:', e)
+      setSubmitError(e.response?.data?.detail || e.message || 'Failed to save prescription')
     } finally {
       setSaving(false)
     }
@@ -158,7 +239,7 @@ function CreatePrescription() {
       key="create-rx"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
-      className="flex flex-col gap-6 max-w-3xl"
+      className={`flex flex-col gap-6 ${step === 2 ? 'max-w-5xl' : 'max-w-3xl'}`}
     >
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/prescriptions')} className="text-muted hover:text-text transition-colors">
@@ -243,8 +324,18 @@ function CreatePrescription() {
                     <label className="text-xs text-muted block mb-1">Phone</label>
                     <input value={newPatient.phone} onChange={e => setNewPatient(f => ({ ...f, phone: e.target.value }))} className={inputCls} />
                   </div>
+                  {patientError && (
+                    <p className="col-span-2 text-xs text-danger">{patientError}</p>
+                  )}
                   <div className="col-span-2 flex justify-end">
-                    <button type="submit" className="px-4 py-2 bg-accent text-black text-xs font-medium rounded-lg">Save & Select</button>
+                    <button
+                      type="button"
+                      onClick={handleAddNewPatient}
+                      disabled={savingPatient || !newPatient.first_name.trim() || !newPatient.last_name.trim()}
+                      className="px-4 py-2 bg-accent text-black text-xs font-medium rounded-lg disabled:opacity-50"
+                    >
+                      {savingPatient ? 'Saving...' : 'Save & Continue'}
+                    </button>
                   </div>
                 </form>
               )}
@@ -315,8 +406,17 @@ function CreatePrescription() {
                     <label className="text-xs text-muted block mb-1">Hospital</label>
                     <input value={newDoctor.hospital} onChange={e => setNewDoctor(f => ({ ...f, hospital: e.target.value }))} className={inputCls} />
                   </div>
+                  {doctorError && (
+                    <p className="col-span-2 text-xs text-danger">{doctorError}</p>
+                  )}
                   <div className="col-span-2 flex justify-end">
-                    <button type="submit" className="px-4 py-2 bg-accent text-black text-xs font-medium rounded-lg">Save & Select</button>
+                    <button
+                      type="submit"
+                      disabled={savingDoctor || !newDoctor.first_name.trim() || !newDoctor.last_name.trim()}
+                      className="px-4 py-2 bg-accent text-black text-xs font-medium rounded-lg disabled:opacity-50"
+                    >
+                      {savingDoctor ? 'Saving...' : 'Save & Continue'}
+                    </button>
                   </div>
                 </form>
               )}
@@ -331,97 +431,138 @@ function CreatePrescription() {
 
       {/* Step 2: Medications */}
       {step === 2 && (
-        <div className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4">
-          <h2 className="text-sm font-medium text-text">Add Medications</h2>
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-            <input
-              value={productSearch}
-              onChange={e => handleProductSearch(e.target.value)}
-              placeholder="Search medication..."
-              className={`${inputCls} pl-9`}
-            />
-            {productResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
-                {productResults.map(p => (
-                  <button
-                    key={p.product_id}
-                    onClick={() => addItem(p)}
-                    className="w-full text-left px-3 py-2 hover:bg-card transition-colors"
-                  >
-                    <p className="text-sm text-text">{p.name}</p>
-                    <p className="text-xs text-muted">Stock: {p.stock} · {p.sale_price?.toFixed(2)}₺</p>
-                  </button>
+        <div className="flex gap-4 items-start">
+          {/* Left: main content */}
+          <div className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4 flex-1 min-w-0">
+            <h2 className="text-sm font-medium text-text">Add Medications</h2>
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                value={productSearch}
+                onChange={e => handleProductSearch(e.target.value)}
+                placeholder="Search medication..."
+                className={`${inputCls} pl-9`}
+              />
+              {productResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+                  {productResults.map(p => (
+                    <button
+                      key={p.product_id}
+                      onClick={() => addItem(p)}
+                      className="w-full text-left px-3 py-2 hover:bg-card transition-colors"
+                    >
+                      <p className="text-sm text-text">{p.name}</p>
+                      <p className="text-xs text-muted">Stock: {p.stock} · {p.sale_price?.toFixed(2)}₺</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {items.length > 0 && (
+              <div className="flex flex-col gap-3">
+                {items.map(item => (
+                  <div key={item.product_id} className="bg-surface rounded-lg p-3 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-text">{item.name}</p>
+                      <button onClick={() => removeItem(item.product_id)} className="text-muted hover:text-danger transition-colors">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted block mb-1">Qty</label>
+                        <input
+                          type="number" min={1} value={item.quantity_requested}
+                          onChange={e => updateItem(item.product_id, 'quantity_requested', e.target.value)}
+                          className="w-full bg-card border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted block mb-1">Dosage</label>
+                        <input
+                          value={item.dosage}
+                          onChange={e => updateItem(item.product_id, 'dosage', e.target.value)}
+                          placeholder="e.g. 1x1"
+                          className="w-full bg-card border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted block mb-1">Duration</label>
+                        <input
+                          value={item.duration}
+                          onChange={e => updateItem(item.product_id, 'duration', e.target.value)}
+                          placeholder="e.g. 7 days"
+                          className="w-full bg-card border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted block mb-1">Stock</label>
+                        <p className={`text-xs mt-1 font-medium ${item.stock === 0 ? 'text-danger' : item.stock <= 10 ? 'text-warning' : 'text-accent'}`}>
+                          {item.stock} units
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
-          </div>
 
-          {items.length > 0 && (
-            <div className="flex flex-col gap-3">
-              {items.map(item => (
-                <div key={item.product_id} className="bg-surface rounded-lg p-3 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-text">{item.name}</p>
-                    <button onClick={() => removeItem(item.product_id)} className="text-muted hover:text-danger transition-colors">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    <div>
-                      <label className="text-[10px] text-muted block mb-1">Qty</label>
-                      <input
-                        type="number" min={1} value={item.quantity_requested}
-                        onChange={e => updateItem(item.product_id, 'quantity_requested', e.target.value)}
-                        className="w-full bg-card border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted block mb-1">Dosage</label>
-                      <input
-                        value={item.dosage}
-                        onChange={e => updateItem(item.product_id, 'dosage', e.target.value)}
-                        placeholder="e.g. 1x1"
-                        className="w-full bg-card border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted block mb-1">Duration</label>
-                      <input
-                        value={item.duration}
-                        onChange={e => updateItem(item.product_id, 'duration', e.target.value)}
-                        placeholder="e.g. 7 days"
-                        className="w-full bg-card border border-border rounded px-2 py-1 text-xs text-text focus:outline-none focus:border-accent"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted block mb-1">Stock</label>
-                      <p className={`text-xs mt-1 font-medium ${item.stock === 0 ? 'text-danger' : item.stock <= 10 ? 'text-warning' : 'text-accent'}`}>
-                        {item.stock} units
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            {items.length === 0 && (
+              <p className="text-sm text-muted text-center py-4">Search and add medications above</p>
+            )}
+
+            <div>
+              <label className="text-xs text-muted block mb-1">Notes</label>
+              <textarea
+                rows={2} value={notes}
+                onChange={e => setNotes(e.target.value)}
+                className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent resize-none"
+              />
             </div>
-          )}
 
-          {items.length === 0 && (
-            <p className="text-sm text-muted text-center py-4">Search and add medications above</p>
-          )}
-
-          <div>
-            <label className="text-xs text-muted block mb-1">Notes</label>
-            <textarea
-              rows={2} value={notes}
-              onChange={e => setNotes(e.target.value)}
-              className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent resize-none"
-            />
+            <div className="flex justify-between">
+              <Button variant="secondary" onClick={() => setStep(1)}>Back</Button>
+              <Button disabled={items.length === 0} onClick={() => setStep(3)}>Review</Button>
+            </div>
           </div>
 
-          <div className="flex justify-between">
-            <Button variant="secondary" onClick={() => setStep(1)}>Back</Button>
-            <Button disabled={items.length === 0} onClick={() => setStep(3)}>Review</Button>
+          {/* Right: suggestions panel */}
+          <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3 w-60 shrink-0">
+            <p className="text-xs font-semibold text-text">💡 Suggested Add-ons</p>
+            {suggestionsLoading ? (
+              <div className="flex flex-col gap-2">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-16 bg-surface rounded-lg animate-pulse" />
+                ))}
+              </div>
+            ) : suggestions.length === 0 ? (
+              <p className="text-xs text-muted text-center py-6">No suggestions yet — add more items</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {suggestions.map(s => (
+                  <div key={s.product_id} className="bg-surface rounded-lg p-3 flex flex-col gap-1.5">
+                    <p className="text-xs font-medium text-text leading-snug">{s.name}</p>
+                    {s.confidence !== null && (
+                      <p className="text-[10px] text-muted">{s.confidence}% co-purchase rate</p>
+                    )}
+                    <div className="flex items-center justify-between mt-0.5">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        s.stock > 10 ? 'bg-accent/10 text-accent' : 'bg-warning/10 text-warning'
+                      }`}>
+                        {s.stock} in stock
+                      </span>
+                      <button
+                        onClick={() => addFromSuggestion(s)}
+                        className="text-[10px] text-accent hover:underline font-medium"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -464,13 +605,22 @@ function CreatePrescription() {
             </div>
           </div>
 
+          {dispenseResult && (
+            <div className="rounded-lg px-3 py-2 text-xs bg-accent/10 border border-accent/20 text-text">
+              {dispenseResult}
+            </div>
+          )}
+          {submitError && <p className="text-xs text-red-400">{submitError}</p>}
           <div className="flex justify-between gap-3">
             <Button variant="secondary" onClick={() => setStep(2)}>Back</Button>
             <div className="flex gap-2">
               <Button variant="secondary" disabled={saving} onClick={() => handleSubmit(false)}>
                 Save as Pending
               </Button>
-              <Button disabled={saving} onClick={() => handleSubmit(true)}>
+              <Button
+                disabled={saving || !selectedPatient || items.length === 0}
+                onClick={() => handleSubmit(true)}
+              >
                 {saving ? 'Processing...' : 'Confirm & Dispense'}
               </Button>
             </div>

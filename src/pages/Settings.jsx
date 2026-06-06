@@ -1,9 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/hooks/useAuth'
 import { useStore } from '@/store/useStore'
+import { useAPI } from '@/hooks/useAPI'
 import i18n from '@/i18n'
+import { seedDemoData } from '@/lib/api'
 
 const LANGUAGES = [
   { code: 'tr', label: 'Türkçe' },
@@ -14,7 +16,26 @@ function Settings() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
   const { clearChat } = useStore()
+  const { fetchDashboard } = useAPI()
   const currentLang = i18n.language
+  const [seeding, setSeeding] = useState(false)
+  const [seedToast, setSeedToast] = useState('')
+
+  const handleSeedDemo = async () => {
+    setSeeding(true)
+    setSeedToast('')
+    try {
+      const res = await seedDemoData()
+      const d = res.data
+      setSeedToast(`Loaded! ${d.products} products · ${d.patients} patients · ${d.doctors} doctors · ${d.sales} sales`)
+      fetchDashboard?.()
+    } catch (e) {
+      setSeedToast('Failed: ' + (e.response?.data?.detail || e.message))
+    } finally {
+      setSeeding(false)
+      setTimeout(() => setSeedToast(''), 5000)
+    }
+  }
 
   const handleLanguageChange = (code) => {
     i18n.changeLanguage(code)
@@ -81,6 +102,28 @@ function Settings() {
         >
           {t('settings.clear_chat')}
         </button>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5 flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-text">Demo Data</h2>
+        <p className="text-xs text-muted -mt-1">
+          This will add sample products, patients, doctors and sales to your account
+        </p>
+        <button
+          onClick={handleSeedDemo}
+          disabled={seeding}
+          className="w-fit flex items-center gap-2 px-4 py-2 bg-accent text-black text-sm font-medium rounded-lg disabled:opacity-60 hover:bg-opacity-90 transition-colors"
+        >
+          {seeding && (
+            <div className="w-3.5 h-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+          )}
+          {seeding ? 'Loading...' : 'Load Demo Data'}
+        </button>
+        {seedToast && (
+          <p className={`text-xs ${seedToast.startsWith('Failed') ? 'text-danger' : 'text-accent'}`}>
+            {seedToast}
+          </p>
+        )}
       </div>
 
       <div className="bg-card border border-border rounded-xl p-5">
