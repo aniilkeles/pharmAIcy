@@ -86,7 +86,7 @@ function Prescriptions() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs text-muted font-medium">RX Number</th>
+                <th className="px-4 py-3 text-left text-xs text-muted font-medium">Prescription #</th>
                 <th className="px-4 py-3 text-left text-xs text-muted font-medium">Patient</th>
                 <th className="px-4 py-3 text-left text-xs text-muted font-medium">Doctor</th>
                 <th className="px-4 py-3 text-left text-xs text-muted font-medium">Items</th>

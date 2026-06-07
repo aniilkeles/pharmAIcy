@@ -155,31 +155,133 @@ def identify_barcode(barcode: str) -> dict:
         return {"found": False, "source": "error"}
 
 
+def _check_interaction_claude(name_a: str, name_b: str) -> dict:
+    if not _ai_enabled:
+        return {"has_interaction": False, "severity": "mild", "description": ""}
+    prompt = (
+        f"Are there any clinically significant drug interactions between {name_a} and {name_b}?\n"
+        "Answer in JSON only:\n"
+        '{"has_interaction": bool, "severity": "mild" or "moderate" or "severe", "description": "string (max 100 chars)"}\n'
+        'If no known interaction return {"has_interaction": false, "severity": "mild", "description": ""}'
+    )
+    try:
+        response = client.messages.create(
+            model=MODEL, max_tokens=200,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text)
+    except Exception:
+        return {"has_interaction": False, "severity": "mild", "description": ""}
+
+
+def _name_matches(drug_name: str, product_name: str) -> bool:
+    """True if drug_name is a substring of product_name or vice versa (case-insensitive)."""
+    d = drug_name.lower().strip()
+    p = product_name.lower().strip()
+    return d in p or p in d
+
+
 def check_drug_interactions(db: Session, product_ids: list) -> list:
     try:
         from backend.models import DrugInteraction, Product
 
+        if len(product_ids) < 2:
+            return []
+
         products = db.query(Product).filter(Product.product_id.in_(product_ids)).all()
-        product_names = [p.name.lower() for p in products]
+        product_map = {p.product_id: p.name for p in products}
 
+        print(f"[check_drug_interactions] product_ids={product_ids}")
+        print(f"[check_drug_interactions] product_names={list(product_map.values())}")
+
+        # Load all interactions once; we do matching in Python so both directions
+        # and all substring combinations are covered correctly.
         all_interactions = db.query(DrugInteraction).all()
+        print(f"[check_drug_interactions] {len(all_interactions)} total rows in drug_interactions table")
+        for row in all_interactions:
+            print(f"  -> id={row.id} drug_a='{row.drug_a}' drug_b='{row.drug_b}' severity='{row.severity}'")
+
         found = []
+        checked_pairs = set()
+        ids = list(dict.fromkeys(product_ids))
 
-        for inter in all_interactions:
-            drug_a = inter.drug_a.lower()
-            drug_b = inter.drug_b.lower()
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                pid_a, pid_b = ids[i], ids[j]
+                pair_key = (min(pid_a, pid_b), max(pid_a, pid_b))
+                if pair_key in checked_pairs:
+                    continue
+                checked_pairs.add(pair_key)
 
-            a_match = any(drug_a in name or name in drug_a for name in product_names)
-            b_match = any(drug_b in name or name in drug_b for name in product_names)
+                name_a = product_map.get(pid_a, "")
+                name_b = product_map.get(pid_b, "")
+                if not name_a or not name_b:
+                    continue
 
-            if a_match and b_match:
-                found.append({
-                    "drug_a": inter.drug_a,
-                    "drug_b": inter.drug_b,
-                    "severity": inter.severity,
-                    "description": inter.description
-                })
+                print(f"[check_drug_interactions] checking pair: '{name_a}' vs '{name_b}'")
 
+                # Real matches (exclude cached "no-interaction" sentinel rows)
+                local_matches = [
+                    inter for inter in all_interactions
+                    if inter.severity != "none" and (
+                        (_name_matches(inter.drug_a, name_a) and _name_matches(inter.drug_b, name_b)) or
+                        (_name_matches(inter.drug_a, name_b) and _name_matches(inter.drug_b, name_a))
+                    )
+                ]
+                # Whether this pair was already checked and confirmed "no interaction"
+                has_cached_none = any(
+                    inter.severity == "none" and (
+                        (_name_matches(inter.drug_a, name_a) and _name_matches(inter.drug_b, name_b)) or
+                        (_name_matches(inter.drug_a, name_b) and _name_matches(inter.drug_b, name_a))
+                    )
+                    for inter in all_interactions
+                )
+
+                print(f"[check_drug_interactions] local_matches={len(local_matches)}, has_cached_none={has_cached_none}")
+
+                if local_matches:
+                    for inter in local_matches:
+                        found.append({
+                            "drug_a": inter.drug_a,
+                            "drug_b": inter.drug_b,
+                            "severity": inter.severity,
+                            "description": inter.description,
+                            "product_a_id": pid_a,
+                            "product_b_id": pid_b
+                        })
+                elif not has_cached_none:
+                    result = _check_interaction_claude(name_a, name_b)
+                    if result.get("has_interaction"):
+                        new_inter = DrugInteraction(
+                            drug_a=name_a, drug_b=name_b,
+                            severity=result.get("severity", "moderate"),
+                            description=result.get("description", "")
+                        )
+                        db.add(new_inter)
+                        db.commit()
+                        found.append({
+                            "drug_a": name_a,
+                            "drug_b": name_b,
+                            "severity": result.get("severity", "moderate"),
+                            "description": result.get("description", ""),
+                            "product_a_id": pid_a,
+                            "product_b_id": pid_b
+                        })
+                    else:
+                        db.add(DrugInteraction(
+                            drug_a=name_a, drug_b=name_b,
+                            severity="none", description=""
+                        ))
+                        db.commit()
+
+        print(f"[check_drug_interactions] returning {len(found)} interactions")
         return found
-    except Exception:
+    except Exception as e:
+        import traceback
+        print(f"[check_drug_interactions] ERROR: {e}\n{traceback.format_exc()}")
         return []

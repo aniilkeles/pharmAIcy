@@ -97,11 +97,9 @@ def _audit(db: Session, user_id: str, action: str, entity_type: str = None, enti
 
 
 def _generate_rx_number(db: Session) -> str:
-    today = date.today().strftime("%Y%m%d")
-    count = db.query(Prescription).filter(
-        Prescription.rx_number.like(f"RX-{today}-%")
-    ).count()
-    return f"RX-{today}-{count + 1:04d}"
+    year = datetime.now().year
+    sequence = db.query(Prescription).count() + 1
+    return f"P-{year}-{sequence:06d}"
 
 # ─── Pydantic Models ───────────────────────────────────────────────────────────
 
@@ -1040,6 +1038,21 @@ def repeat_prescription(rx_id: int, request: Request, db: Session = Depends(get_
 @app.post("/drug-interactions/check")
 def check_interactions(body: DrugInteractionCheck, request: Request, db: Session = Depends(get_current_db)):
     return check_drug_interactions(db, body.product_ids)
+
+@app.post("/check-interactions")
+def check_interactions_by_ids(body: DrugInteractionCheck, request: Request, db: Session = Depends(get_current_db)):
+    print(f"[POST /check-interactions] received product_ids={body.product_ids}")
+    result = check_drug_interactions(db, body.product_ids)
+    print(f"[POST /check-interactions] returning {len(result)} interactions: {result}")
+    return result
+
+@app.get("/prescriptions/{rx_id}/interactions")
+def get_prescription_interactions(rx_id: int, request: Request, db: Session = Depends(get_current_db)):
+    rx = db.query(Prescription).filter(Prescription.id == rx_id).first()
+    if not rx:
+        raise HTTPException(404, "Prescription not found")
+    product_ids = [item.product_id for item in rx.items]
+    return check_drug_interactions(db, product_ids)
 
 # ─── Sales ─────────────────────────────────────────────────────────────────────
 

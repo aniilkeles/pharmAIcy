@@ -145,6 +145,12 @@ export const repeatPrescription = (id) =>
 export const checkDrugInteractions = (product_ids) =>
   api.post('/drug-interactions/check', { product_ids })
 
+export const checkInteractions = (product_ids) =>
+  api.post('/check-interactions', { product_ids })
+
+export const getPrescriptionInteractions = (rx_id) =>
+  api.get(`/prescriptions/${rx_id}/interactions`)
+
 export const getPrescriptionSuggestions = (product_ids) =>
   api.post('/prescriptions/suggest', { product_ids })
 

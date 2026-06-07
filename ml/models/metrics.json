@@ -1,0 +1,1 @@
+{"mae": 1.62, "rmse": 1.97, "r2": -0.507, "feature_importance": {"sales_last_7_days": 0.0852, "sales_last_30_days": 0.1443, "sales_last_90_days": 0.1821, "avg_daily_sales": 0.2044, "day_of_week": 0.143, "month": 0.1207, "current_stock": 0.0559, "stock_ratio": 0.0553, "is_low_stock": 0.0071, "is_expiry_pressure": 0.0019}}

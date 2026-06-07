@@ -114,7 +114,7 @@
     "fulfillment_rate": "Fulfillment Rate",
     "drug_interaction_warning": "Drug Interaction Warning",
     "out_of_stock_warning": "Out of Stock Warning",
-    "number": "RX Number",
+    "number": "Prescription #",
     "date": "Date",
     "patient": "Patient",
     "doctor": "Doctor",

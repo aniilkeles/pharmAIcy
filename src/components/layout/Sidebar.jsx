@@ -26,7 +26,7 @@ function Sidebar() {
   return (
     <aside className="w-16 flex flex-col items-center py-4 gap-1 border-r border-border bg-surface shrink-0">
       <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center mb-4">
-        <span className="text-black font-bold text-xs">Rx</span>
+        <span className="text-base leading-none">💊</span>
       </div>
       {navItems.map(({ to, icon: Icon, label }) => (
         <NavLink

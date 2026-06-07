@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, Search } from 'lucide-react'
 import {
   getPatients, createPatient, getDoctors, createDoctor,
-  searchProducts, createPrescription, getPrescriptionSuggestions
+  searchProducts, createPrescription, getPrescriptionSuggestions, checkInteractions
 } from '@/lib/api'
 import Button from '@/components/ui/Button'
 
@@ -43,6 +43,10 @@ function CreatePrescription() {
   const [suggestions, setSuggestions] = useState([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
 
+  const [interactions, setInteractions] = useState([])
+  const [interactionsLoading, setInteractionsLoading] = useState(false)
+  const [acknowledgeRisk, setAcknowledgeRisk] = useState(false)
+
   useEffect(() => {
     loadPatients()
     loadDoctors()
@@ -60,6 +64,24 @@ function CreatePrescription() {
       .catch(() => setSuggestions([]))
       .finally(() => setSuggestionsLoading(false))
   }, [items, step])
+
+  useEffect(() => {
+    const ids = items.map(i => i.product_id)
+    if (ids.length < 2) { setInteractions([]); setAcknowledgeRisk(false); return }
+    console.log('[drug-interactions] sending product_ids:', ids)
+    setInteractionsLoading(true)
+    setAcknowledgeRisk(false)
+    checkInteractions(ids)
+      .then(res => {
+        console.log('[drug-interactions] response:', res.data)
+        setInteractions(Array.isArray(res.data) ? res.data : [])
+      })
+      .catch(err => {
+        console.error('[drug-interactions] error:', err)
+        setInteractions([])
+      })
+      .finally(() => setInteractionsLoading(false))
+  }, [items])
 
   const preselectPatient = async (pid) => {
     try {
@@ -231,6 +253,38 @@ function CreatePrescription() {
   )
 
   const totalPrice = items.reduce((sum, i) => sum + (i.sale_price * i.quantity_requested), 0)
+  const hasSevere = interactions.some(i => i.severity === 'severe')
+
+  const severityStyle = {
+    severe:   { border: 'border-red-500/50',    badge: 'bg-red-500/20 text-red-400',    icon: '🔴', label: 'SEVERE' },
+    moderate: { border: 'border-orange-500/50', badge: 'bg-orange-500/20 text-orange-400', icon: '🟡', label: 'MODERATE' },
+    mild:     { border: 'border-yellow-500/50', badge: 'bg-yellow-500/20 text-yellow-400', icon: '🟡', label: 'MILD' },
+  }
+
+  const interactionWarningsJSX = (
+    <>
+      {interactionsLoading && (
+        <p className="text-xs text-muted animate-pulse">Checking drug interactions...</p>
+      )}
+      {!interactionsLoading && interactions.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-semibold text-warning">⚠️ Drug Interaction Warning</p>
+          {interactions.map((inter, idx) => {
+            const s = severityStyle[inter.severity] || severityStyle.moderate
+            return (
+              <div key={idx} className={`border ${s.border} rounded-lg p-3 flex flex-col gap-1`}>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded w-fit ${s.badge}`}>
+                  {s.icon} {s.label}
+                </span>
+                <p className="text-xs font-medium text-text">{inter.drug_a} + {inter.drug_b}</p>
+                {inter.description && <p className="text-xs text-muted">{inter.description}</p>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
 
   const inputCls = "w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
 
@@ -512,6 +566,8 @@ function CreatePrescription() {
               <p className="text-sm text-muted text-center py-4">Search and add medications above</p>
             )}
 
+            {interactionWarningsJSX}
+
             <div>
               <label className="text-xs text-muted block mb-1">Notes</label>
               <textarea
@@ -605,6 +661,23 @@ function CreatePrescription() {
             </div>
           </div>
 
+          {interactionWarningsJSX}
+
+          {hasSevere && (
+            <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <input
+                type="checkbox"
+                id="acknowledge-risk"
+                checked={acknowledgeRisk}
+                onChange={e => setAcknowledgeRisk(e.target.checked)}
+                className="mt-0.5 cursor-pointer"
+              />
+              <label htmlFor="acknowledge-risk" className="text-xs text-red-400 cursor-pointer">
+                I acknowledge the drug interaction risk
+              </label>
+            </div>
+          )}
+
           {dispenseResult && (
             <div className="rounded-lg px-3 py-2 text-xs bg-accent/10 border border-accent/20 text-text">
               {dispenseResult}
@@ -618,7 +691,8 @@ function CreatePrescription() {
                 Save as Pending
               </Button>
               <Button
-                disabled={saving || !selectedPatient || items.length === 0}
+                variant={hasSevere ? 'danger' : 'primary'}
+                disabled={saving || !selectedPatient || items.length === 0 || (hasSevere && !acknowledgeRisk)}
                 onClick={() => handleSubmit(true)}
               >
                 {saving ? 'Processing...' : 'Confirm & Dispense'}
