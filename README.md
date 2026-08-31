@@ -30,7 +30,7 @@ The system was designed to address the fundamental limitation of existing pharma
 │   Five AI Agents    │        │  Per-Tenant SQLite Database  │
 │                     │        │  pharmacy_{user_id}.db       │
 │  ► Data Agent       │        │                             │
-│  ► Prediction Agent │        │  9 Tables: Products,        │
+│  ► Prediction Agent │        │  10 Tables: Products,       │
 │  ► Interaction Agent│        │  Inventory, Sales,          │
 │  ► Expiry Agent     │        │  Prescriptions, Patients,   │
 │  ► Decision Agent   │        │  Doctors, DrugInteractions  │
@@ -68,13 +68,13 @@ The system was designed to address the fundamental limitation of existing pharma
 ### Machine Learning — Demand Forecasting
 - Random Forest regressor trained on historical sales data
 - Feature set: 7 variables including rolling sales windows, calendar features, stock ratios
-- Evaluation metrics: MAE, RMSE, R² (outperforms ARIMA baseline)
+- Evaluation metrics: MAE, RMSE, R² — see [Model Comparison](#model-comparison-rf-vs-lstm-vs-arima) below for honest results across models
 - 7-day ahead per-product demand predictions
 
 ### Association Rule Mining — Cross-Sell
 - Apriori algorithm on pharmacy transaction history
 - Human-readable rules: *"If Aspirin → Pantoprazol (confidence: 78%)"*
-- Clinically validated co-purchase pattern detection
+- Transaction-based co-purchase pattern detection (not clinically validated — see limitations)
 
 ### AI Decision Agent
 - Anthropic Claude API (claude-sonnet-4-20250514)
@@ -116,7 +116,7 @@ The system was designed to address the fundamental limitation of existing pharma
 
 ## Database Schema
 
-9 tables with full relational integrity:
+10 tables with full relational integrity:
 
 ```
 Products → Inventory → Sales
@@ -136,15 +136,41 @@ Products → Inventory → Sales
 
 ## ML Performance Results
 
-| Metric | PharmAIcy (Random Forest) | Baseline (ARIMA) |
-|--------|--------------------------|------------------|
-| MAE | ~2.3 units | ~4.8 units |
-| Drug Interaction Detection | 89%+ accuracy | N/A |
-| Prescription Workflow Correctness | 100% | N/A |
+### Drug Interaction Detection & Workflow Correctness
+
+| Metric | Result |
+|--------|--------|
+| Drug Interaction Detection — seeded pairs (local DB) | 15/15 (100%) |
+| Drug Interaction Detection — novel pairs (Claude API fallback) | 8/10 (80%) |
+| Prescription Workflow Correctness (4 test scenarios) | 100% |
+
+### Model Comparison: RF vs. LSTM vs. ARIMA
+
+We tested more than one forecasting approach rather than assuming Random Forest was the best choice, and report the results honestly — including where simpler models won.
+
+**On the app's own synthetic dataset** (50 products, 1000 sales records — reproducible via `python scripts/compare_rf_lstm.py`):
+
+| Model | MAE | RMSE | R² |
+|-------|-----|------|-----|
+| Random Forest | 4.32 | 5.27 | -0.076 |
+| LSTM | 2.45 | 4.77 | -0.443 |
+
+**On a real 12-month sales history from a community pharmacy in Turkey** (8,684 SKUs, held-out month evaluation — see the accompanying paper for full methodology):
+
+| Model | MAE | RMSE | R² |
+|-------|-----|------|-----|
+| ARIMA(1,0,0) | 0.82 | 1.64 | 0.861 |
+| LSTM | 0.92 | 1.91 | 0.810 |
+| Naive (last month) | 1.04 | 2.30 | 0.725 |
+| Random Forest | 1.12 | 3.30 | 0.437 |
+
+**Takeaway:** on real pharmacy data, simpler sequence-aware models (ARIMA, LSTM) outperformed Random Forest, which underperformed even a naive baseline. We view this as a useful, honest finding rather than something to hide — it shaped our understanding of why tree ensembles struggle with sparse, intermittent-demand SKU-level data, and is discussed in more depth in the [accompanying paper](#).
 
 ---
 
 ## Comparison with Existing Solutions
+
+*Based on publicly documented product features as of 2026, not a hands-on audit of each system.*
 
 | System | Country | Predictive Analytics | AI Decision Support | Cross-Sell | LLM Integration |
 |--------|---------|---------------------|---------------------|------------|-----------------|
@@ -160,8 +186,8 @@ Products → Inventory → Sales
 
 This project was developed as a **Software Engineering graduation project** at Toros University, Faculty of Engineering, Software Engineering Department. The system addresses a real gap in Turkish pharmacy management software by combining:
 
-- **Academic rigor:** Literature-backed ML methodology (Random Forest for demand forecasting, Apriori for cross-sell analysis, as validated by Lotfi et al. 2022 and Sarikaya et al. 2021)
-- **Production-ready engineering:** Full desktop packaging, JWT auth, rate limiting, atomic transactions
+- **Honest experimentation:** demand forecasting was tested across Random Forest, LSTM, and ARIMA — including a real-world pilot where the initial Random Forest approach underperformed simpler baselines, a result we report rather than hide (see [Model Comparison](#model-comparison-rf-vs-lstm-vs-arima))
+- **Solid engineering fundamentals:** full desktop packaging, JWT auth, rate limiting, atomic transactions — described as a research prototype, not a production-ready system (role-based access control is not yet implemented)
 - **AI innovation:** Multi-agent architecture with Anthropic Claude API integration for natural language decision support
 
 ---
