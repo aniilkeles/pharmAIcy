@@ -1,0 +1,406 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{float}
+\usepackage{parskip}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{tabularx}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue,
+    pdftitle={PharmAIcy: A Multi-Agent AI Architecture for Pharmacy Management},
+    pdfauthor={Anil Keles, Mesut Deniz Zeka}
+}
+
+\title{%
+    \textbf{PharmAIcy: A Multi-Agent AI Architecture for}\\
+    \textbf{Pharmacy Management --- Prototype Design and}\\
+    \textbf{a Real-World Evaluation}
+}
+
+\author{
+    An{\i}l Kele\c{s}\thanks{Corresponding author: \href{mailto:aniilkeles@gmail.com}{aniilkeles@gmail.com}} \quad
+    Mesut Deniz Zeka \\[4pt]
+    \textit{Department of Software Engineering, Faculty of Engineering} \\
+    \textit{Toros University, Mersin, Turkey} \\[4pt]
+    \href{https://github.com/aniilkeles/pharmAIcy}{\texttt{github.com/aniilkeles/pharmAIcy}}
+}
+
+\date{August 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Traditional pharmacy management systems are largely reactive tools built for transaction recording rather than proactive decision support. This paper presents \textbf{PharmAIcy}, a multi-agent desktop prototype that combines demand forecasting, association-rule-based cross-sell suggestions, expiry monitoring, and a hybrid (local database + LLM) drug-interaction check within a single pharmacy workflow. The system is organized as five cooperating agents --- Data, Prediction, Interaction, Expiry, and Decision --- built on a Python FastAPI backend, an Electron.js/React desktop frontend, and a per-tenant SQLite data layer, with the Anthropic Claude API used for natural-language decision support and interaction-check fallback. The prescription-confirmation workflow is implemented as a single atomic database transaction with partial-fulfilment support, so that failures mid-transaction cannot leave inventory in an inconsistent state.
+
+We evaluate the Prediction Agent's Random Forest demand-forecasting component in two settings. First, on a small synthetic dataset used during initial development (200 transactions, 30 products), it achieved MAE~1.66, RMSE~1.97 and a negative R\textsuperscript{2}. Second, and more importantly, on a real 12-month sales history from a community pharmacy in Turkey (8{,}684 SKUs), we compare the same Random Forest model against a naive last-value baseline and a per-SKU ARIMA(1,0,0) model on an identical held-out month. On this real data, both simpler baselines outperform Random Forest (ARIMA: MAE~0.82, RMSE~1.64, R\textsuperscript{2}~0.861; naive: MAE~1.04, RMSE~2.30, R\textsuperscript{2}~0.725; Random Forest: MAE~1.12, RMSE~3.30, R\textsuperscript{2}~0.437). We report and analyze this negative result rather than omit it. The hybrid drug-interaction check achieved 15/15 correct detections on seeded interaction pairs and 8/10 on a small held-out set of novel pairs. We present PharmAIcy as a research prototype, not a production-ready system, and describe its current limitations explicitly. Source code: \url{https://github.com/aniilkeles/pharmAIcy}.
+
+\smallskip
+\noindent\textbf{Keywords:} Multi-Agent Systems, Machine Learning, Demand Forecasting, Pharmacy Management, Large Language Models, Random Forest, Association Rule Mining
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ── 1. Introduction ────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+
+Pharmacy management requires the simultaneous handling of hundreds of products, prescriptions, expiry dates, stock levels, and demand fluctuations. Widely used pharmacy software solutions --- including RxMediaPharm (Turkey), Pharmakon (Germany), QS/1~NRx (USA), and MedEye (Netherlands) --- are, based on their publicly documented feature sets, oriented primarily around transaction recording rather than predictive analytics or AI-assisted decision support \cite{uthayakumar2013}. This creates a gap between what is technically feasible with current machine-learning and LLM tooling and what community pharmacies typically use day to day.
+
+Pharmacists routinely face three practical challenges: (1)~demand uncertainty leading to stockouts or overstocking, (2)~the difficulty of checking for drug interactions quickly and reliably, and (3)~missed opportunities for clinically sensible complementary-product recommendations. We address these challenges through \textbf{PharmAIcy}, a multi-agent prototype built as a Software Engineering graduation project, where each operational concern --- data aggregation, demand prediction, cross-sell suggestion, expiry monitoring, and decision synthesis --- is handled by a dedicated agent rather than a single monolithic model \cite{wooldridge2009}.
+
+We treat this project as a research prototype and a learning exercise in applied ML engineering, and we try to be explicit throughout about what has and has not been validated, including a real-world result that runs against our initial expectations.
+
+\subsection*{Contributions}
+\begin{enumerate}[leftmargin=*]
+    \item A \textbf{five-agent architecture} for pharmacy management (Data, Prediction, Interaction, Expiry, Decision), each encapsulating a distinct method and communicating structured outputs to a coordinating Decision Agent.
+    \item A \textbf{demand-forecasting pipeline} using Random Forest regression, evaluated on both a small synthetic dataset and --- separately and honestly --- on a real 12-month community-pharmacy sales history, including a case where Random Forest underperforms simple ARIMA and naive baselines, which we analyze rather than hide.
+    \item A \textbf{transaction-based cross-sell module} using the Apriori algorithm, without claiming a clinical validation that was not performed.
+    \item A \textbf{hybrid drug-interaction check} combining a small pre-seeded local database with an LLM (Anthropic Claude API) fallback for pairs not present locally, with the LLM's answer cached but treated as an unverified suggestion.
+    \item A \textbf{transactionally safe prescription-confirmation mechanism} with partial-fulfilment support, so that database or stock failures mid-transaction cannot leave inventory records inconsistent.
+    \item A \textbf{working prototype implementation} (FastAPI + Electron.js + per-tenant SQLite) described in enough detail to reproduce the design, together with an explicit list of what is not yet implemented (e.g.\ full role-based access control).
+\end{enumerate}
+
+The remainder of the paper is organized as follows. Section~\ref{sec:related} reviews related work. Section~\ref{sec:architecture} describes the system architecture. Section~\ref{sec:implementation} describes implementation details. Section~\ref{sec:results} reports experimental results, including the real-world pilot. Section~\ref{sec:limitations} discusses limitations. Section~\ref{sec:conclusion} concludes.
+
+% ── 2. Related Work ────────────────────────────────────────────
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Inventory Management and Demand Forecasting in Pharmacy}
+
+Uthayakumar and Priyan~\cite{uthayakumar2013} developed an optimization model for order quantities across a pharmaceutical company and a hospital, showing that stochastic, demand-uncertainty-aware policies can reduce total cost compared to simpler deterministic (EOQ-style) approaches. Giannoccaro and Pontrandolfo~\cite{giannoccaro2002} proposed a reinforcement-learning formulation for supply-chain inventory control, an early example of applying learning-based methods more broadly to inventory problems.
+
+For short-horizon demand forecasting specifically, Random Forest regression and classical time-series models such as ARIMA~\cite{box2015arima} remain widely used baselines. Neural approaches such as LSTM and Transformer-based forecasters have shown strong results on large, high-frequency retail datasets, as highlighted by the M5 forecasting competition~\cite{makridakis2022}; which family of methods performs best in practice depends strongly on data granularity, series length, and the amount of demand intermittency, a point this paper's own experiments in Section~\ref{sec:results} illustrate directly for community-pharmacy SKU-level data.
+
+\subsection{Association Rule Mining for Cross-Sell Analysis}
+
+The Apriori algorithm, introduced by Agrawal and Srikant~\cite{agrawal1994}, remains a standard, interpretable approach for mining frequent itemsets from transaction data and is widely used in retail market-basket analysis. In a pharmacy setting, co-purchase patterns can carry clinical meaning --- for example, a gastroprotective agent recommended alongside long-term NSAID use --- but confirming that a mined rule reflects genuine clinical practice, rather than a spurious transactional correlation, requires pharmacist review or comparison against published guidelines. We have not performed such a validation for the rules discussed here, so we describe the module as a \emph{transaction-based} cross-sell recommendation engine rather than a clinically validated one.
+
+\subsection{Large Language Models in Clinical Decision Support}
+
+Shah, Entwistle, and Pfeffer~\cite{shah2023} argue that the creation and adoption of large language models in medicine needs to be actively and carefully shaped --- with explicit attention to what data underlies a model and how its claimed benefits are verified in deployment --- rather than assumed by default. This motivates a cautious design choice in PharmAIcy: the Decision Agent's drug-interaction check consults a small, manually curated local database first and only falls back to an LLM call for pairs not present locally, treating the LLM's answer as an unverified suggestion rather than a certified clinical result. This mirrors long-standing guidance in the clinical decision-support literature that automated recommendations should be transparent, conservative under uncertainty, and easy for a clinician to override~\cite{bates2003}.
+
+\subsection{Multi-Agent Systems}
+
+Wooldridge~\cite{wooldridge2009} provides the standard reference treatment of multi-agent system design, including how independent, specialized agents can be composed and coordinated through structured message-passing. PharmAIcy's five-agent decomposition follows this general pattern: each agent owns one operational concern and exposes a narrow interface to a coordinating Decision Agent, which keeps individual components easier to reason about and test in isolation than a single monolithic system would be.
+
+% ── 3. System Architecture ─────────────────────────────────────
+\section{System Architecture}
+\label{sec:architecture}
+
+\subsection{Overview}
+
+PharmAIcy is a desktop application built on a four-tier architecture: an Electron.js/React presentation layer, a Python FastAPI application layer, a layer of five specialized agents, and a per-tenant SQLite persistence layer, with the Anthropic Claude API reachable as an external service from the Decision Agent (Figure~\ref{fig:arch}).
+
+\begin{figure}[H]
+\centering
+\begin{tabular}{|c|}
+\hline
+\textbf{Electron.js Frontend} (React 18 + Tailwind CSS + Vite) \\
+\hline
+$\downarrow$ IPC (contextBridge) \\
+\hline
+\textbf{Python FastAPI Backend} (SQLAlchemy ORM) \\
+\hline
+$\downarrow$ Agent calls \\
+\hline
+\textbf{Five AI Agents} $\quad|\quad$ \textbf{Per-Tenant SQLite} \\
+(Data / Prediction / Interaction / Expiry / Decision) $\quad|\quad$ \texttt{pharmacy\_\{user\_id\}.db} \\
+\hline
+$\downarrow$ External API \\
+\hline
+\textbf{Anthropic Claude API} (claude-sonnet-4) \\
+\hline
+\end{tabular}
+\caption{PharmAIcy system architecture: a four-tier design (presentation, application, agent, data) with an external LLM dependency.}
+\label{fig:arch}
+\end{figure}
+
+The key architectural decisions are: (1)~a desktop-first deployment to support pharmacies with unreliable internet connectivity and a preference for keeping pharmacy data local; (2)~per-tenant SQLite isolation, so that one pharmacy's data lives in a physically separate file from another's, rather than relying solely on row-level security in a shared database; (3)~a multi-agent backend so that each AI capability can be developed, tested, and reasoned about independently; and (4)~using a third-party auth provider (Supabase) for authentication only, while keeping all pharmacy operational data local to the tenant's SQLite file.
+
+\subsection{Multi-Tenant Data Architecture}
+
+Each pharmacy account receives a dedicated SQLite database file, \texttt{pharmacy\_\{user\_id\}.db}. This per-file isolation is a simple but effective separation guarantee: a query issued for one pharmacy cannot, by construction, reach another pharmacy's file, which removes an entire class of row-level-security misconfiguration bugs at the cost of some operational flexibility (e.g.\ cross-tenant analytics require an explicit aggregation step rather than a single query).
+
+The database schema comprises ten tables: \texttt{Products}, \texttt{Inventory}, \texttt{Sales}, \texttt{Prescriptions}, \texttt{PrescriptionItems}, \texttt{Patients}, \texttt{Doctors}, \texttt{Notifications}, \texttt{AuditLog}, and \texttt{DrugInteractions}, with foreign-key relationships enforced via SQLAlchemy ORM. The \texttt{DrugInteractions} table is pre-seeded with 30 manually curated, clinically significant interaction pairs relevant to commonly dispensed medications in Turkey, and grows over time as the Decision Agent caches new interaction checks returned by the Claude API fallback.
+
+\subsection{Five-Agent Architecture}
+
+Table~\ref{tab:agents} summarizes the five agents, their function, the underlying method, and their output.
+
+\begin{table}[H]
+\centering
+\caption{Five-agent architecture: function, method, and output.}
+\label{tab:agents}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{lXXX}
+\toprule
+\textbf{Agent} & \textbf{Function} & \textbf{Method / Library} & \textbf{Output} \\
+\midrule
+Data Agent & Sales \& stock aggregation & pandas, NumPy & Top products, revenue, low-stock alerts \\
+Prediction Agent & Short-horizon demand forecast & Random Forest (scikit-learn) & Per-product demand estimate, MAE/RMSE/R\textsuperscript{2} \\
+Interaction Agent & Cross-sell suggestions & Apriori (mlxtend) & Product pairs with confidence, support, lift \\
+Expiry Agent & Expiry monitoring, FEFO prioritization & datetime, pandas & Urgent/warning lists, reorder suggestions \\
+Decision Agent & Synthesis, chatbot, interaction check & Anthropic Claude API & Natural-language recommendations, Q\&A, interaction verdicts \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Agents are invoked from FastAPI endpoints, receive a SQLAlchemy database session as their primary input, and return structured Python dictionaries serialized to JSON. The Decision Agent calls the Claude API with a pharmacy-specific system prompt and a short window of recent conversation turns to support coherent multi-turn dialogue.
+
+\subsection{Prescription Workflow and Transaction Safety}
+
+The prescription module implements a four-step workflow: patient selection, doctor selection, item addition (with live stock and interaction checks), and a review-and-confirm step. Stock deduction happens only at confirmation, inside a single SQLAlchemy database transaction; if any part of that step fails --- including a partial stock deduction for an item that turns out to be out of stock --- the entire transaction is rolled back, so no orphaned records or inconsistent inventory states are left behind. The system also supports \emph{partial fulfilment}: if an item cannot be fully dispensed due to insufficient stock, the available quantity is dispensed, the item is marked \texttt{partial}, and a critical-stock notification is generated for the pharmacist. This transactional design, rather than any specific ML metric, is what we would consider the most directly production-relevant piece of engineering in this prototype.
+
+\subsection{Security Architecture}
+
+Authentication is handled by Supabase Auth; the Electron frontend stores session tokens using Electron's \texttt{safeStorage} API (AES-256 encrypted at rest). Every FastAPI request carries a bearer JWT verified against Supabase's user-info endpoint, and the server extracts the verified \texttt{user\_id} from that token rather than trusting any client-supplied header. Rate limiting is applied at two tiers: 100 requests/minute for standard endpoints and 10 requests/minute for AI (Claude API) endpoints, to bound both cost and abuse surface. Inter-process communication between the Electron renderer and main process goes through a \texttt{contextBridge} preload script with \texttt{nodeIntegration} disabled and \texttt{contextIsolation} enabled, following current Electron security guidance. As noted in Section~\ref{sec:limitations}, a full role-based access-control layer (distinguishing pharmacist, technician, and administrator roles) is not yet implemented.
+
+% ── 4. Implementation ──────────────────────────────────────────
+\section{Implementation}
+\label{sec:implementation}
+
+\subsection{Technology Stack}
+
+\begin{table}[H]
+\centering
+\caption{PharmAIcy technology stack.}
+\label{tab:tech}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\toprule
+\textbf{Component} & \textbf{Technology} & \textbf{Version} \\
+\midrule
+Desktop shell & Electron.js & 28+ \\
+Frontend framework & React & 18 \\
+Build tool & Vite & 5 \\
+Styling & Tailwind CSS & 3 \\
+State management & Zustand & 4 \\
+Backend framework & FastAPI & 0.111 \\
+Backend runtime & Python & 3.10+ \\
+ORM & SQLAlchemy & 2.0 \\
+Database & SQLite & 3 \\
+ML library & scikit-learn & 1.5 \\
+Association rules & mlxtend & 0.23 \\
+Data processing & pandas / NumPy & 2.2 / 1.26 \\
+LLM & Anthropic Claude API & claude-sonnet-4 \\
+Authentication & Supabase Auth & 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Demand-Forecasting Pipeline}
+
+The Prediction Agent's original design aggregates historical sales per product per day over a 180-day window and engineers seven features: rolling 7-, 30-, and 90-day sales sums (\texttt{sales\_last\_7\_days}, \texttt{sales\_last\_30\_days}, \texttt{sales\_last\_90\_days}), average daily sales, day of week, calendar month, and a binary expiry-pressure indicator. The target is the sum of sales in the following 7 days. A \texttt{RandomForestRegressor} (100 estimators, max depth 10) is trained with \texttt{TimeSeriesSplit} cross-validation (3 folds) to respect temporal ordering and avoid leakage. For the real-world evaluation in Section~\ref{sec:realworld}, only monthly-resolution data was available, so the feature set was adapted to lagged monthly sales rather than the full 7/30/90-day daily window described here; we flag this difference explicitly rather than presenting the two evaluations as directly equivalent.
+
+\subsection{Drug Interaction Detection}
+
+The hybrid check operates in two stages. First, a \textbf{local database lookup}: the \texttt{DrugInteractions} table is queried for the product pair, and if found, the stored description is returned in under 50\,ms. Second, an \textbf{LLM fallback}: if the pair is not present locally, a structured prompt asks the Claude API whether a clinically significant interaction exists between the two named drugs; the response is cached locally for future queries, so coverage expands over time without repeated API calls for the same pair. This design follows the caution argued for by Shah et al.~\cite{shah2023}: the LLM is used to extend coverage, not to override or replace the curated local database.
+
+% ── 5. Results ──────────────────────────────────────────────────
+\section{Experiments and Results}
+\label{sec:results}
+
+\subsection{Synthetic Dataset (Initial Development)}
+
+During initial development, the Prediction Agent was trained and evaluated on a small synthetic dataset of 200 transactions across 30 products, generated to reflect plausible Turkish community-pharmacy demand patterns (seasonal variation, low-frequency products, expiry-pressure events), using \texttt{TimeSeriesSplit} with 3 folds.
+
+\begin{table}[H]
+\centering
+\caption{Prediction Agent performance on the small synthetic dataset.}
+\label{tab:synthetic}
+\begin{tabular}{lll}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Interpretation} \\
+\midrule
+MAE & 1.66 units & Average absolute forecast error \\
+RMSE & 1.97 units & Root mean square error \\
+R\textsuperscript{2} & $-$0.466 & Below a naive mean-prediction baseline \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A negative R\textsuperscript{2} means the model performed worse than simply predicting the mean of the target for every example. With only 200 transactions spread across 30 products, there is very little per-product history to learn from, which is a plausible explanation; at the time, however, this was only a hypothesis, which is what motivated testing on real data.
+
+\subsection{Real-World Pilot: A Community Pharmacy in Turkey}
+\label{sec:realworld}
+
+To test that hypothesis, we obtained anonymized monthly sales data from a community pharmacy in Turkey covering 8{,}684 distinct SKUs and 12 months of transaction history (barcode, monthly units sold, current stock, and critical-stock threshold; no patient-identifiable information was included). Of the 8{,}684 SKUs, 3{,}119 had at least one recorded sale during the period.
+
+\textbf{Setup.} For each active SKU, we built one training example per month $t \in \{4,\dots,10\}$ using the three preceding months' sales as lag features, their rolling mean, current stock, critical-stock threshold, and month index, with month $t$'s sales as the target. We evaluated three models on a held-out sample of 400 SKUs, forecasting November's sales from data through October: (1)~the same Random Forest configuration used above, trained on the full set of active-SKU examples; (2)~a naive baseline predicting next month equal to the previous month; (3)~ARIMA(1,0,0), fit independently per SKU on that SKU's first 10 months of history.
+
+\begin{table}[H]
+\centering
+\caption{Forecasting performance on the real-world pharmacy dataset, held-out month (November), $n=400$ SKUs.}
+\label{tab:realworld}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{MAE} & \textbf{RMSE} & \textbf{R\textsuperscript{2}} \\
+\midrule
+ARIMA(1,0,0) & \textbf{0.82} & \textbf{1.64} & \textbf{0.861} \\
+Naive (last month) & 1.04 & 2.30 & 0.725 \\
+Random Forest & 1.12 & 3.30 & 0.437 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{This result is the opposite of what we expected}, and we report it as such. On real, larger-scale data, both the naive baseline and a simple per-SKU ARIMA model outperform the Random Forest model that PharmAIcy currently ships with. We see two likely contributing factors. First, most SKUs in a community pharmacy show intermittent, low-volume demand (the median monthly sales figure across the full catalog is zero), a regime where simple per-SKU models can generalize better than a single pooled ensemble trained across very heterogeneous products. Second, monthly aggregation discards the day- and week-level structure the original 7-day design (Section~\ref{sec:implementation}) was meant to exploit; only monthly-resolution data was available for this pilot, which is a limitation of the pilot's data access rather than of the underlying approach. We treat this as a genuine, useful negative result that should shape the next iteration of the Prediction Agent (Section~\ref{sec:limitations}), rather than a result to downplay.
+
+\subsection{Drug Interaction Detection}
+
+The drug-interaction check was evaluated on 15 pairs present in the local pre-seeded database and 10 novel pairs not present locally (Table~\ref{tab:drug}). As expected, the local lookup was correct on all 15 seeded pairs (this is a direct database read, not a prediction). For the 10 novel pairs, the Claude API fallback correctly flagged 8; the two missed pairs involved less common drug combinations for which the model conservatively returned ``no known interaction.'' Given the small size of this held-out set, we treat this as a preliminary indication rather than a statistically robust accuracy estimate, and we flag a larger, clinically curated benchmark as necessary future work before any real deployment.
+
+\begin{table}[H]
+\centering
+\caption{Drug interaction detection results.}
+\label{tab:drug}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\toprule
+\textbf{Test set} & \textbf{Correct detections} & \textbf{Detection rate} \\
+\midrule
+Seeded interactions (local DB) & 15 / 15 & 100\% \\
+Novel pairs (Claude API fallback) & 8 / 10 & 80\% \\
+Response time (local DB) & $<$50\,ms & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Prescription Workflow Correctness}
+
+The prescription-confirmation transaction (Section~\ref{sec:architecture}) was tested under four scenarios designed to exercise both the happy path and the main failure modes (Table~\ref{tab:prescription}); all four behaved as intended.
+
+\begin{table}[H]
+\centering
+\caption{Prescription workflow correctness under four scenarios.}
+\label{tab:prescription}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\toprule
+\textbf{Scenario} & \textbf{Expected result} & \textbf{Result} \\
+\midrule
+All items in stock & Dispensed, stock deducted & PASS \\
+Some items out of stock & Partial dispensing, notification & PASS \\
+All items out of stock & Cancelled, no stock change & PASS \\
+DB failure mid-transaction & Full rollback, no partial deduction & PASS \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Feature Comparison with Existing Systems}
+
+Table~\ref{tab:comparison} compares PharmAIcy's advertised feature set against the publicly documented capabilities of RxMediaPharm, Pharmakon, and QS/1~NRx, based on each vendor's own public product documentation and marketing materials as of 2026 rather than a hands-on audit of each system; readers evaluating a specific deployment should confirm current capabilities directly with each vendor.
+
+\begin{table}[H]
+\centering
+\caption{Feature comparison based on publicly documented capabilities.}
+\label{tab:comparison}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Feature} & \textbf{RxMediaPharm} & \textbf{Pharmakon} & \textbf{QS/1 NRx} & \textbf{PharmAIcy} \\
+\midrule
+Stock tracking & \checkmark & \checkmark & \checkmark & \checkmark \\
+Prescription management & \checkmark & \checkmark & \checkmark & \checkmark \\
+ML-based demand forecasting & $\times$ & $\times$ & $\times$ & \checkmark (prototype) \\
+Cross-sell suggestions & $\times$ & $\times$ & $\times$ & \checkmark (prototype) \\
+LLM-assisted interaction check & $\times$ & $\times$ & $\times$ & \checkmark (prototype) \\
+Natural-language chatbot & $\times$ & $\times$ & $\times$ & \checkmark (prototype) \\
+Multi-tenant desktop deployment & $\times$ & $\times$ & $\times$ & \checkmark \\
+Open source & $\times$ & $\times$ & $\times$ & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ── 6. Limitations ─────────────────────────────────────────────
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+We list the main limitations explicitly:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Forecasting accuracy on real data}: as shown in Section~\ref{sec:realworld}, the current Random Forest model does not outperform simple baselines on real monthly sales data. Concrete next steps include per-SKU or per-category pooling, intermittent-demand-specific methods (e.g.\ Croston's method), and access to daily rather than monthly transaction logs so the original 7-day design can be tested as intended.
+    \item \textbf{Minimum data requirement}: the Random Forest model requires at least 10 historical sales records per product; below this threshold the system returns a graceful \texttt{insufficient\_data} response, so forecasting is unavailable for a newly onboarded pharmacy for the first several days of operation.
+    \item \textbf{Drug-interaction evaluation}: the 10-pair novel-pair test set is too small to support a strong accuracy claim; a larger, clinically curated benchmark is needed, and integrating a structured pharmacological reference (e.g.\ a national drug registry) would extend coverage beyond the 30 manually seeded entries.
+    \item \textbf{Cross-sell validation}: mined association rules have not been reviewed by a pharmacist or checked against clinical guidelines.
+    \item \textbf{Access control}: JWT authentication and AES-256 session encryption are implemented, but a full role-based access-control system (pharmacist / technician / administrator) is not yet in place, which would be required before handling real patient data in production.
+    \item \textbf{Scale of real-world testing}: the real-world evaluation in this paper used historical sales data from one community pharmacy; the system's decision-support features (interaction checking, cross-sell, expiry prioritization) have not yet been used prospectively in a live pharmacy workflow.
+\end{itemize}
+
+For these reasons we describe PharmAIcy as a research prototype rather than a production-ready system.
+
+% ── 7. Conclusion ──────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented PharmAIcy, a five-agent prototype for pharmacy management combining machine-learning demand forecasting, association-rule-based cross-sell suggestions, expiry monitoring, a transactionally safe prescription-confirmation mechanism, and a hybrid LLM-assisted drug-interaction check. Rather than presenting only favorable numbers, we deliberately included a real-world evaluation showing our initial Random Forest forecasting approach underperforming simple ARIMA and naive baselines on actual pharmacy sales data, and we discussed plausible reasons why. We believe this kind of transparent negative result is more useful --- both academically and as a demonstration of engineering judgment --- than an inflated claim would be. Future work includes adapting the forecasting pipeline to intermittent-demand methods and daily-resolution data, a pharmacist-reviewed evaluation of the cross-sell rules, a larger clinically curated drug-interaction benchmark, completing role-based access control, and running a prospective (rather than retrospective) pilot in an active pharmacy.
+
+\begin{thebibliography}{9}
+
+\bibitem{agrawal1994}
+R.~Agrawal and R.~Srikant,
+``Fast algorithms for mining association rules,''
+in \textit{Proc. 20th Int. Conf. Very Large Data Bases (VLDB)}, 1994, pp.~487--499.
+
+\bibitem{bates2003}
+D.~W.~Bates, G.~J.~Kuperman, S.~Wang, T.~Gandhi, A.~Kittler, L.~Volk,
+C.~Spurr, R.~Khorasani, M.~Tanasijevic, and B.~Middleton,
+``Ten commandments for effective clinical decision support: Making the
+practice of evidence-based medicine a reality,''
+\textit{J. Am. Med. Inform. Assoc.}, vol.~10, no.~6, pp.~523--530, 2003.
+
+\bibitem{box2015arima}
+G.~E.~P.~Box, G.~M.~Jenkins, G.~C.~Reinsel, and G.~M.~Ljung,
+\textit{Time Series Analysis: Forecasting and Control}, 5th~ed.
+Wiley, 2015.
+
+\bibitem{giannoccaro2002}
+I.~Giannoccaro and P.~Pontrandolfo,
+``Inventory management in supply chains: A reinforcement learning approach,''
+\textit{Int. J. Production Economics}, vol.~78, no.~2, pp.~153--161, 2002.
+
+\bibitem{makridakis2022}
+S.~Makridakis, E.~Spiliotis, and V.~Assimakopoulos,
+``M5 accuracy competition: Results, findings, and conclusions,''
+\textit{Int. J. Forecasting}, vol.~38, no.~4, pp.~1346--1364, 2022.
+
+\bibitem{shah2023}
+N.~H.~Shah, D.~Entwistle, and M.~A.~Pfeffer,
+``Creation and adoption of large language models in medicine,''
+\textit{JAMA}, vol.~330, no.~9, pp.~866--869, 2023.
+
+\bibitem{uthayakumar2013}
+R.~Uthayakumar and S.~Priyan,
+``Pharmaceutical supply chain and inventory management strategies:
+Optimisation for a pharmaceutical company and a hospital,''
+\textit{Operations Research for Health Care}, vol.~2, no.~3, pp.~52--64, 2013.
+
+\bibitem{wooldridge2009}
+M.~Wooldridge,
+\textit{An Introduction to MultiAgent Systems}, 2nd~ed.
+Wiley, 2009.
+
+\bibitem{zeka2026}
+M.~D.~Zeka and A.~Kele\c{s},
+``PharmAIcy --- AI-Powered Pharmacy Management System,''
+GitHub repository, 2026.
+\url{https://github.com/aniilkeles/pharmAIcy}
+
+\end{thebibliography}
+
+\end{document}

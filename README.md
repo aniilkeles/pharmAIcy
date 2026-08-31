@@ -155,7 +155,7 @@ We tested more than one forecasting approach rather than assuming Random Forest 
 | Random Forest | 4.32 | 5.27 | -0.076 |
 | LSTM | 2.45 | 4.77 | -0.443 |
 
-**On a real 12-month sales history from a community pharmacy in Turkey** (8,684 SKUs, held-out month evaluation — see the accompanying paper for full methodology):
+**On a real 12-month sales history from a community pharmacy in Turkey** (8,684 SKUs, held-out month evaluation — see the [accompanying paper](paper/pharmAIcy_arxiv_paper_v3.pdf) for full methodology):
 
 | Model | MAE | RMSE | R² |
 |-------|-----|------|-----|
@@ -164,7 +164,7 @@ We tested more than one forecasting approach rather than assuming Random Forest 
 | Naive (last month) | 1.04 | 2.30 | 0.725 |
 | Random Forest | 1.12 | 3.30 | 0.437 |
 
-**Takeaway:** on real pharmacy data, simpler sequence-aware models (ARIMA, LSTM) outperformed Random Forest, which underperformed even a naive baseline. We view this as a useful, honest finding rather than something to hide — it shaped our understanding of why tree ensembles struggle with sparse, intermittent-demand SKU-level data, and is discussed in more depth in the [accompanying paper](#).
+**Takeaway:** on real pharmacy data, simpler sequence-aware models (ARIMA, LSTM) outperformed Random Forest, which underperformed even a naive baseline. We view this as a useful, honest finding rather than something to hide — it shaped our understanding of why tree ensembles struggle with sparse, intermittent-demand SKU-level data, and is discussed in more depth in the [accompanying paper](paper/pharmAIcy_arxiv_paper_v3.pdf).
 
 ---
 
