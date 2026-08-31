@@ -1241,7 +1241,8 @@ def _seed_demo_data(db: Session) -> dict:
     for s in sales_to_add:
         db.add(s)
     db.commit()
-
+    from agents.drug_interaction_seed_data import seed_drug_interactions  
+    interactions_seeded = seed_drug_interactions(db)
     _check_and_create_notifications(db)
 
     return {
